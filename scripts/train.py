@@ -4,7 +4,8 @@ import os
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv
 
-from rla_rag.data.dataset import load_toy_dataset, split_qa_samples
+from rla_rag.data.loaders import load_project_dataset
+from rla_rag.data.dataset import split_qa_samples
 from rla_rag.env.rla_rag_env import RlaRagEnv
 from rla_rag.eval.runner import evaluate_policy
 from rla_rag.pipeline import build_pipeline
@@ -28,6 +29,12 @@ def make_env(docs, qa_samples, seed: int = 42):
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--dataset", type=str, default="toy", choices=["toy", "hotpot"])
+    parser.add_argument("--hotpot-path", type=str, default="")
+    parser.add_argument("--max-samples", type=int, default=0)
+    parser.add_argument("--train-ratio", type=float, default=0.6)
+    parser.add_argument("--dev-ratio", type=float, default=0.2)
+
     parser.add_argument("--timesteps", type=int, default=30000)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--model-out", type=str, default="models/ppo_rla_rag.zip")
@@ -39,9 +46,23 @@ def main():
     if model_dir:
         os.makedirs(model_dir, exist_ok=True)
 
-    docs, qa_samples = load_toy_dataset()
-    train_samples, dev_samples, test_samples = split_qa_samples(qa_samples, seed=args.seed)
+    docs, qa_samples = load_project_dataset(
+        dataset=args.dataset,
+        hotpot_path=args.hotpot_path,
+        max_samples=args.max_samples if args.max_samples > 0 else None,
+    )
+    train_samples, dev_samples, test_samples = split_qa_samples(
+        qa_samples,
+        train_ratio=args.train_ratio,
+        dev_ratio=args.dev_ratio,
+        seed=args.seed,
+    )
     eval_samples = dev_samples if dev_samples else test_samples
+
+    print(
+        f"Dataset={args.dataset}, docs={len(docs)}, qa={len(qa_samples)}, "
+        f"train/dev/test={len(train_samples)}/{len(dev_samples)}/{len(test_samples)}"
+    )
 
     vec_env = DummyVecEnv([make_env(docs, train_samples, seed=args.seed + i) for i in range(args.n_envs)])
     model = PPO(

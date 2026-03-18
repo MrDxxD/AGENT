@@ -8,3 +8,6 @@ __pycache__/
 models/
 logs/
 *.log
+data/raw/
+data/processed/
+tests/.tmp/
