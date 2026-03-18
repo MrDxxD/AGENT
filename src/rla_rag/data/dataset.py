@@ -1,5 +1,6 @@
+﻿import random
 from dataclasses import dataclass
-from typing import List, Set, Tuple
+from typing import List, Sequence, Set, Tuple
 
 
 @dataclass(frozen=True)
@@ -137,3 +138,30 @@ def load_toy_dataset() -> Tuple[List[Document], List[QASample]]:
     ]
     return docs, qa_samples
 
+
+def split_qa_samples(
+    qa_samples: Sequence[QASample],
+    train_ratio: float = 0.75,
+    dev_ratio: float = 0.125,
+    seed: int = 42,
+) -> Tuple[List[QASample], List[QASample], List[QASample]]:
+    samples = list(qa_samples)
+    rng = random.Random(seed)
+    rng.shuffle(samples)
+
+    n = len(samples)
+    train_end = max(1, int(n * train_ratio))
+    dev_end = min(n, train_end + max(1, int(n * dev_ratio)))
+
+    train = samples[:train_end]
+    dev = samples[train_end:dev_end]
+    test = samples[dev_end:]
+
+    if not test:
+        test = dev[-1:] if dev else train[-1:]
+        if dev:
+            dev = dev[:-1]
+        elif train:
+            train = train[:-1]
+
+    return train, dev, test
