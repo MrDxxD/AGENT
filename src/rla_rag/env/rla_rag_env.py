@@ -113,11 +113,13 @@ class RlaRagEnv(gym.Env):
         support = self.current_sample.support_doc_ids
         self.support_coverage = len(self.evidence_doc_ids & support) / max(1, len(support))
 
-    def _add_docs(self, doc_ids: List[str]):
+    def _add_docs(self, doc_ids: List[str]) -> int:
+        before = len(self.evidence_doc_ids)
         for doc_id in doc_ids:
             if doc_id not in self.evidence_doc_ids:
                 self.evidence_doc_ids.add(doc_id)
                 self.evidence_chunks.append(self.pipeline.get_doc_text(doc_id))
+        return len(self.evidence_doc_ids) - before
 
     def _answer(self):
         answer, confidence = self.pipeline.reasoner.answer(
@@ -128,7 +130,14 @@ class RlaRagEnv(gym.Env):
         self.last_confidence = confidence
         return answer, confidence
 
-    def _finalize_info(self, predicted: str, reward: float, done: bool) -> Dict:
+    def _finalize_info(
+        self,
+        predicted: str,
+        reward: float,
+        terminated_by_answer: bool,
+        terminated: bool,
+        truncated: bool,
+    ) -> Dict:
         gold = self.current_sample.answer
         is_correct = normalize_text(predicted) == normalize_text(gold)
         return {
@@ -138,36 +147,53 @@ class RlaRagEnv(gym.Env):
             "support_coverage": self.support_coverage,
             "steps": self.step_count,
             "token_cost": self.token_cost,
-            "done_by_answer": done,
+            "done_by_answer": terminated_by_answer,
+            "terminated": terminated,
+            "truncated": truncated,
             "reward": reward,
             "qid": self.current_sample.qid,
         }
 
     def step(self, action: int):
         assert self.current_sample is not None, "Environment not reset."
+
+        action_id = int(action)
+        if action_id < 0 or action_id >= len(Action):
+            self.step_count += 1
+            reward = -1.0
+            info = self._finalize_info(
+                predicted="INVALID_ACTION",
+                reward=reward,
+                terminated_by_answer=False,
+                terminated=False,
+                truncated=True,
+            )
+            return self._obs(), float(reward), False, True, info
+
         self.step_count += 1
-        self.last_action = int(action)
-        reward = -0.005
+        self.last_action = action_id
+        reward = -0.01
         terminated = False
         truncated = False
+        terminated_by_answer = False
         predicted_answer = "UNKNOWN"
         previous_coverage = self.support_coverage
 
-        act = Action(int(action))
+        act = Action(action_id)
         if act == Action.RETRIEVE_SPARSE:
             results = self.pipeline.search_sparse(self.current_sample.question, self.current_query, k=3)
-            self._add_docs([r.doc_id for r in results])
+            new_docs = self._add_docs([r.doc_id for r in results])
             if results:
                 self.best_sparse_score = max(self.best_sparse_score, results[0].score)
-                reward += 0.02
+            reward += 0.03 * new_docs if new_docs > 0 else -0.02
             self.token_cost += self._estimate_token_cost(self.current_query) + 20
 
         elif act == Action.RETRIEVE_DENSE:
             results = self.pipeline.search_dense(self.current_sample.question, self.current_query, k=3)
-            self._add_docs([r.doc_id for r in results])
+            new_docs = self._add_docs([r.doc_id for r in results])
             if results:
                 self.best_dense_score = max(self.best_dense_score, results[0].score)
-                reward += 0.02
+            reward += 0.03 * new_docs if new_docs > 0 else -0.02
             self.token_cost += self._estimate_token_cost(self.current_query) + 20
 
         elif act == Action.REWRITE_QUERY:
@@ -178,36 +204,43 @@ class RlaRagEnv(gym.Env):
                 self.evidence_chunks,
             )
             changed = self.current_query != old_query
-            reward += 0.02 if changed else -0.01
+            reward += 0.01 if changed else -0.02
             self.token_cost += self._estimate_token_cost(self.current_query)
 
         elif act == Action.SUMMARIZE_EVIDENCE:
             old_summary = self.summary
             self.summary = self.pipeline.summarize(self.evidence_chunks, max_sentences=2)
             changed = self.summary != old_summary and bool(self.summary)
-            reward += 0.02 if changed else -0.01
+            reward += 0.01 if changed else -0.02
             self.token_cost += 10
 
         elif act == Action.ANSWER_NOW:
             predicted_answer, confidence = self._answer()
             is_correct = normalize_text(predicted_answer) == normalize_text(self.current_sample.answer)
             if not self.evidence_doc_ids:
-                reward -= 0.50
-            reward += 1.20 if is_correct else -0.80
+                reward -= 0.40
+            reward += 1.20 if is_correct else -0.90
             reward += 0.05 * confidence
             terminated = True
+            terminated_by_answer = True
 
         self._update_coverage()
         coverage_gain = self.support_coverage - previous_coverage
-        reward += 0.60 * coverage_gain
-        reward -= 0.001 * max(0, self.token_cost - self.max_token_budget / 2)
+        reward += 0.50 * coverage_gain
+        reward -= 0.002 * max(0, self.token_cost - self.max_token_budget)
 
         if not terminated and self.step_count >= self.max_steps:
             predicted_answer, confidence = self._answer()
             is_correct = normalize_text(predicted_answer) == normalize_text(self.current_sample.answer)
-            reward += 1.0 if is_correct else -0.60
+            reward += 1.0 if is_correct else -0.80
             reward += 0.05 * confidence
             truncated = True
 
-        info = self._finalize_info(predicted_answer, reward, terminated or truncated)
+        info = self._finalize_info(
+            predicted=predicted_answer,
+            reward=reward,
+            terminated_by_answer=terminated_by_answer,
+            terminated=terminated,
+            truncated=truncated,
+        )
         return self._obs(), float(reward), terminated, truncated, info

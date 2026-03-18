@@ -4,15 +4,14 @@ import os
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv
 
-from rla_rag.data.dataset import load_toy_dataset
+from rla_rag.data.dataset import load_toy_dataset, split_qa_samples
 from rla_rag.env.rla_rag_env import RlaRagEnv
 from rla_rag.eval.runner import evaluate_policy
 from rla_rag.pipeline import build_pipeline
 
 
-def make_env(seed: int = 42):
-    docs, qa_samples = load_toy_dataset()
-    pipeline = build_pipeline(docs, qa_samples)
+def make_env(docs, qa_samples, seed: int = 42):
+    pipeline = build_pipeline(docs)
 
     def _env():
         return RlaRagEnv(
@@ -40,7 +39,11 @@ def main():
     if model_dir:
         os.makedirs(model_dir, exist_ok=True)
 
-    vec_env = DummyVecEnv([make_env(seed=args.seed + i) for i in range(args.n_envs)])
+    docs, qa_samples = load_toy_dataset()
+    train_samples, dev_samples, test_samples = split_qa_samples(qa_samples, seed=args.seed)
+    eval_samples = dev_samples if dev_samples else test_samples
+
+    vec_env = DummyVecEnv([make_env(docs, train_samples, seed=args.seed + i) for i in range(args.n_envs)])
     model = PPO(
         "MlpPolicy",
         vec_env,
@@ -57,9 +60,9 @@ def main():
     model.learn(total_timesteps=args.timesteps, progress_bar=True)
     model.save(args.model_out)
 
-    eval_env = make_env(seed=args.seed + 1000)()
+    eval_env = make_env(docs, eval_samples, seed=args.seed + 1000)()
     metrics = evaluate_policy(model, eval_env, episodes=args.eval_episodes)
-    print("Training finished. Evaluation metrics:")
+    print("Training finished. Evaluation metrics (dev/test split):")
     for k, v in metrics.items():
         print(f"{k}: {v:.4f}")
 

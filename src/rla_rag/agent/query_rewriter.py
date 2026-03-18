@@ -1,29 +1,66 @@
-﻿from typing import List
+﻿import re
+from collections import Counter
+from typing import List
+
+
+_BRIDGE_HINTS = [
+    ("capital", "country capital"),
+    ("country", "country"),
+    ("who", "person"),
+    ("where", "location"),
+    ("首都", "国家 首都"),
+    ("谁", "人物"),
+    ("哪里", "地点"),
+    ("在哪", "地点"),
+]
+
+
+def _keywords_from_evidence(evidence_chunks: List[str], current_query: str, k: int = 4) -> List[str]:
+    text = " ".join(evidence_chunks)
+
+    en_tokens = re.findall(r"\b[A-Za-z][A-Za-z\-']{2,}\b", text)
+    zh_tokens = re.findall(r"[\u4e00-\u9fff]{2,}", text)
+    tokens = [t.lower() for t in en_tokens] + zh_tokens
+
+    stop = {
+        "the",
+        "and",
+        "for",
+        "that",
+        "this",
+        "with",
+        "from",
+        "into",
+        "is",
+        "was",
+        "are",
+        "it",
+        "of",
+        "in",
+        "to",
+        "a",
+        "an",
+    }
+
+    query_norm = current_query.lower()
+    counts = Counter(t for t in tokens if t not in stop and len(t) > 1)
+    ranked = [t for t, _ in counts.most_common(20) if t not in query_norm]
+    return ranked[:k]
 
 
 def rewrite_query(question: str, current_query: str, evidence_chunks: List[str]) -> str:
-    """
-    Simple heuristic rewrite:
-    - append salient entities from evidence
-    - add bridge words for multi-hop hints
-    """
     query = current_query.strip()
-    evidence_text = " ".join(evidence_chunks).lower()
+    if not evidence_chunks:
+        return query
 
-    bridge_words = []
-    if "capital" in question.lower() and "country" in question.lower():
-        bridge_words.append("country capital")
-    if "who" in question.lower() and "created" in question.lower():
-        bridge_words.append("founder")
-    if "where" in question.lower():
-        bridge_words.append("located")
+    hints = [v for k, v in _BRIDGE_HINTS if k in question.lower() or k in question]
+    evidence_terms = _keywords_from_evidence(evidence_chunks, query, k=4)
 
-    entity_hints = []
-    for token in ["eiffel", "einstein", "python", "guido", "berlin", "paris", "netherlands"]:
-        if token in evidence_text and token not in query.lower():
-            entity_hints.append(token)
-
-    add_on = " ".join(bridge_words + entity_hints).strip()
+    add_on = " ".join(hints + evidence_terms).strip()
     if not add_on:
         return query
-    return f"{query} {add_on}".strip()
+
+    rewritten = f"{query} {add_on}".strip()
+    if len(rewritten) > 220:
+        return rewritten[:220].rstrip()
+    return rewritten

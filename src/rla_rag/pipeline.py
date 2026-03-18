@@ -2,7 +2,7 @@
 from typing import Dict, List
 
 from rla_rag.agent.reasoner import EvidenceReasoner
-from rla_rag.data.dataset import Document, QASample
+from rla_rag.data.dataset import Document
 from rla_rag.retrieval.dense import DenseRetriever
 from rla_rag.retrieval.reranker import SimpleReranker
 from rla_rag.retrieval.sparse import SparseRetriever
@@ -38,12 +38,12 @@ class Pipeline:
         return ". ".join(sentences[:max_sentences])
 
 
-def build_pipeline(docs: List[Document], qa_samples: List[QASample]) -> Pipeline:
+def build_pipeline(docs: List[Document]) -> Pipeline:
     return Pipeline(
         docs=docs,
         doc_lookup={d.doc_id: d for d in docs},
         sparse=SparseRetriever(docs),
         dense=DenseRetriever(docs),
         reranker=SimpleReranker(docs),
-        reasoner=EvidenceReasoner(candidate_answers=[q.answer for q in qa_samples]),
+        reasoner=EvidenceReasoner(),
     )
