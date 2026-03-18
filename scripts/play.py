@@ -1,8 +1,8 @@
-﻿import argparse
+import argparse
 
 from stable_baselines3 import PPO
 
-from rla_rag.data.dataset import load_toy_dataset
+from rla_rag.data.dataset import load_toy_dataset, split_qa_samples
 from rla_rag.env.rla_rag_env import Action, RlaRagEnv
 from rla_rag.pipeline import build_pipeline
 
@@ -11,13 +11,17 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, default="models/ppo_rla_rag.zip")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--split", type=str, default="test", choices=["dev", "test"])
     args = parser.parse_args()
 
     docs, qa_samples = load_toy_dataset()
-    pipeline = build_pipeline(docs, qa_samples)
+    _, dev_samples, test_samples = split_qa_samples(qa_samples, seed=args.seed)
+    eval_samples = dev_samples if args.split == "dev" and dev_samples else test_samples
+
+    pipeline = build_pipeline(docs)
     env = RlaRagEnv(
         docs=docs,
-        qa_samples=qa_samples,
+        qa_samples=eval_samples,
         pipeline=pipeline,
         max_steps=6,
         max_token_budget=400,
@@ -42,6 +46,7 @@ def main():
     print(f"Predicted: {info.get('predicted_answer')}")
     print(f"Gold: {info.get('gold_answer')}")
     print(f"Correct: {info.get('is_correct')}")
+    print(f"DoneByAnswer: {info.get('done_by_answer')}")
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-﻿import random
+import random
 from enum import IntEnum
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -185,7 +185,7 @@ class RlaRagEnv(gym.Env):
             new_docs = self._add_docs([r.doc_id for r in results])
             if results:
                 self.best_sparse_score = max(self.best_sparse_score, results[0].score)
-            reward += 0.03 * new_docs if new_docs > 0 else -0.02
+            reward += 0.08 * new_docs if new_docs > 0 else -0.03
             self.token_cost += self._estimate_token_cost(self.current_query) + 20
 
         elif act == Action.RETRIEVE_DENSE:
@@ -193,7 +193,7 @@ class RlaRagEnv(gym.Env):
             new_docs = self._add_docs([r.doc_id for r in results])
             if results:
                 self.best_dense_score = max(self.best_dense_score, results[0].score)
-            reward += 0.03 * new_docs if new_docs > 0 else -0.02
+            reward += 0.08 * new_docs if new_docs > 0 else -0.03
             self.token_cost += self._estimate_token_cost(self.current_query) + 20
 
         elif act == Action.REWRITE_QUERY:
@@ -204,21 +204,27 @@ class RlaRagEnv(gym.Env):
                 self.evidence_chunks,
             )
             changed = self.current_query != old_query
-            reward += 0.01 if changed else -0.02
+            if not self.evidence_doc_ids:
+                reward -= 0.08
+            else:
+                reward += 0.01 if changed else -0.02
             self.token_cost += self._estimate_token_cost(self.current_query)
 
         elif act == Action.SUMMARIZE_EVIDENCE:
             old_summary = self.summary
             self.summary = self.pipeline.summarize(self.evidence_chunks, max_sentences=2)
             changed = self.summary != old_summary and bool(self.summary)
-            reward += 0.01 if changed else -0.02
+            if not self.evidence_doc_ids:
+                reward -= 0.08
+            else:
+                reward += 0.01 if changed else -0.02
             self.token_cost += 10
 
         elif act == Action.ANSWER_NOW:
             predicted_answer, confidence = self._answer()
             is_correct = normalize_text(predicted_answer) == normalize_text(self.current_sample.answer)
             if not self.evidence_doc_ids:
-                reward -= 0.40
+                reward -= 0.60
             reward += 1.20 if is_correct else -0.90
             reward += 0.05 * confidence
             terminated = True
@@ -226,7 +232,7 @@ class RlaRagEnv(gym.Env):
 
         self._update_coverage()
         coverage_gain = self.support_coverage - previous_coverage
-        reward += 0.50 * coverage_gain
+        reward += 0.70 * coverage_gain
         reward -= 0.002 * max(0, self.token_cost - self.max_token_budget)
 
         if not terminated and self.step_count >= self.max_steps:

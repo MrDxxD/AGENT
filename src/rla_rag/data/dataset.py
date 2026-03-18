@@ -1,4 +1,4 @@
-﻿import random
+import random
 from dataclasses import dataclass
 from typing import List, Sequence, Set, Tuple
 
@@ -141,8 +141,8 @@ def load_toy_dataset() -> Tuple[List[Document], List[QASample]]:
 
 def split_qa_samples(
     qa_samples: Sequence[QASample],
-    train_ratio: float = 0.75,
-    dev_ratio: float = 0.125,
+    train_ratio: float = 0.6,
+    dev_ratio: float = 0.2,
     seed: int = 42,
 ) -> Tuple[List[QASample], List[QASample], List[QASample]]:
     samples = list(qa_samples)
@@ -165,3 +165,4 @@ def split_qa_samples(
             train = train[:-1]
 
     return train, dev, test
+

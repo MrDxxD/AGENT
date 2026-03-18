@@ -1,4 +1,4 @@
-﻿import argparse
+import argparse
 
 from stable_baselines3 import PPO
 

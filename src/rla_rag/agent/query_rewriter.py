@@ -1,4 +1,4 @@
-﻿import re
+import re
 from collections import Counter
 from typing import List
 
@@ -8,10 +8,6 @@ _BRIDGE_HINTS = [
     ("country", "country"),
     ("who", "person"),
     ("where", "location"),
-    ("首都", "国家 首都"),
-    ("谁", "人物"),
-    ("哪里", "地点"),
-    ("在哪", "地点"),
 ]
 
 
@@ -19,8 +15,7 @@ def _keywords_from_evidence(evidence_chunks: List[str], current_query: str, k: i
     text = " ".join(evidence_chunks)
 
     en_tokens = re.findall(r"\b[A-Za-z][A-Za-z\-']{2,}\b", text)
-    zh_tokens = re.findall(r"[\u4e00-\u9fff]{2,}", text)
-    tokens = [t.lower() for t in en_tokens] + zh_tokens
+    tokens = [t.lower() for t in en_tokens]
 
     stop = {
         "the",
@@ -53,7 +48,8 @@ def rewrite_query(question: str, current_query: str, evidence_chunks: List[str])
     if not evidence_chunks:
         return query
 
-    hints = [v for k, v in _BRIDGE_HINTS if k in question.lower() or k in question]
+    lower_q = question.lower()
+    hints = [v for k, v in _BRIDGE_HINTS if k in lower_q]
     evidence_terms = _keywords_from_evidence(evidence_chunks, query, k=4)
 
     add_on = " ".join(hints + evidence_terms).strip()

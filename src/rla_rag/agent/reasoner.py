@@ -1,6 +1,6 @@
-﻿import re
+import re
 from collections import Counter
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 
 
 def normalize_text(text: str) -> str:
@@ -19,10 +19,7 @@ def _tokenize(text: str) -> List[str]:
 
 
 def _extract_phrases(text: str) -> List[str]:
-    phrases: List[str] = []
-    phrases.extend(re.findall(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b", text))
-    phrases.extend(re.findall(r"[\u4e00-\u9fff]{2,}", text))
-    return [p.strip() for p in phrases if p.strip()]
+    return [p.strip() for p in re.findall(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b", text) if p.strip()]
 
 
 class EvidenceReasoner:
@@ -45,10 +42,12 @@ class EvidenceReasoner:
         }
 
     def _extract_capital_pairs(self, context: str):
-        city_to_country = {}
-        country_to_city = {}
+        city_to_country: Dict[str, str] = {}
+        country_to_city: Dict[str, str] = {}
         patterns = [
-            re.compile(r"([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+is\s+the\s+capital(?:\s+city)?\s+of\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)"),
+            re.compile(
+                r"([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+is\s+the\s+capital(?:\s+city)?\s+of\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)"
+            ),
             re.compile(r"([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+is\s+in\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)"),
         ]
         for sent in re.split(r"[\.!?]\s*", context):
@@ -57,15 +56,39 @@ class EvidenceReasoner:
                 continue
             for pat in patterns:
                 m = pat.search(s)
-                if m:
-                    left = m.group(1).strip()
-                    right = m.group(2).strip()
-                    if "capital" in s.lower():
-                        country_to_city[right] = left
-                        city_to_country[left] = right
-                    else:
-                        city_to_country.setdefault(left, right)
+                if not m:
+                    continue
+                left = m.group(1).strip()
+                right = m.group(2).strip()
+                if "capital" in s.lower():
+                    country_to_city[right] = left
+                    city_to_country[left] = right
+                else:
+                    city_to_country.setdefault(left, right)
         return city_to_country, country_to_city
+
+    def _extract_birth_country_pairs(self, context: str) -> Dict[str, str]:
+        result: Dict[str, str] = {}
+        pattern = re.compile(
+            r"([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+was\s+born\s+in\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)"
+        )
+        for sent in re.split(r"[\.!?]\s*", context):
+            s = sent.strip()
+            if not s:
+                continue
+            m = pattern.search(s)
+            if m:
+                result[m.group(1).strip()] = m.group(2).strip()
+        return result
+
+    def _question_mentions_phrase(self, question_norm: str, phrase: str) -> bool:
+        p_norm = normalize_text(phrase)
+        if not p_norm:
+            return False
+        if p_norm in question_norm:
+            return True
+        tokens = [t for t in p_norm.split() if len(t) >= 4]
+        return any(t in question_norm for t in tokens)
 
     def _best_phrase(self, question: str, context: str) -> Tuple[str, float]:
         phrases = _extract_phrases(context)
@@ -97,16 +120,34 @@ class EvidenceReasoner:
         q_norm = normalize_text(question)
         city_to_country, country_to_city = self._extract_capital_pairs(context)
 
-        if "capital" in q_norm or "首都" in question:
-            for country, city in country_to_city.items():
-                if normalize_text(country) in q_norm:
-                    return city, 0.8
-            for city, country in city_to_country.items():
-                if normalize_text(city) in q_norm:
-                    return country, 0.75
+        if "capital" in q_norm:
+            asks_city = any(x in q_norm for x in ["which city", "what city"])
+            asks_country = any(x in q_norm for x in ["which country", "what country"])
 
-        if any(k in q_norm for k in ["who", "谁", "created", "introduced", "developed", "designed"]):
-            by_matches = re.findall(r"(?:by|introduced by|created by|designed by)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)", context)
+            for country, city in country_to_city.items():
+                if self._question_mentions_phrase(q_norm, country):
+                    return city, 0.85
+
+            for city, country in city_to_country.items():
+                if self._question_mentions_phrase(q_norm, city):
+                    return country, 0.80
+
+            birth_pairs = self._extract_birth_country_pairs(context)
+            if birth_pairs and "birth country" in q_norm:
+                for person, country in birth_pairs.items():
+                    if self._question_mentions_phrase(q_norm, person) and country in country_to_city:
+                        return country_to_city[country], 0.80
+
+            if asks_city and country_to_city:
+                return next(iter(country_to_city.values())), 0.65
+            if asks_country and city_to_country:
+                return next(iter(city_to_country.values())), 0.65
+
+        if any(k in q_norm for k in ["who", "created", "introduced", "developed", "designed"]):
+            by_matches = re.findall(
+                r"(?:by|introduced by|created by|designed by)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)",
+                context,
+            )
             if by_matches:
                 return by_matches[0].strip(), 0.75
 
