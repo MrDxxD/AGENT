@@ -24,7 +24,7 @@ def load_hotpotqa_dataset(
     if not file_path.exists():
         raise FileNotFoundError(f"HotpotQA file not found: {path}")
 
-    with file_path.open("r", encoding="utf-8") as f:
+    with file_path.open("r", encoding="utf-8-sig") as f:
         raw = json.load(f)
 
     if not isinstance(raw, list):
@@ -95,3 +95,4 @@ def load_hotpotqa_dataset(
 
     docs = sorted(title_to_doc.values(), key=lambda d: d.doc_id)
     return docs, qa_samples
+

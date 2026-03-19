@@ -1,0 +1,7 @@
+condition,policy,runs,avg_reward_mean,avg_reward_std,accuracy_mean,accuracy_std,avg_support_coverage_mean,avg_support_coverage_std,avg_steps_mean,avg_steps_std,avg_token_cost_mean,avg_token_cost_std
+full,baseline_react,1,0.5074166666666665,0.0,0.3,0.0,0.75,0.0,5.0,0.0,87.3,0.0
+full,baseline_sparse,1,0.24949999999999992,0.0,0.2,0.0,0.675,0.0,2.0,0.0,29.75,0.0
+full,rl,1,0.5287499999999998,0.0,0.3,0.0,0.775,0.0,2.0,0.0,30.05,0.0
+no_dense,baseline_react,1,0.5144166666666665,0.0,0.3,0.0,0.75,0.0,4.0,0.0,52.8,0.0
+no_dense,baseline_sparse,1,0.24949999999999992,0.0,0.2,0.0,0.675,0.0,2.0,0.0,29.75,0.0
+no_dense,rl,1,0.4237499999999999,0.0,0.3,0.0,0.625,0.0,2.0,0.0,30.05,0.0

@@ -31,6 +31,11 @@ class RlaRagEnv(gym.Env):
         max_steps: int = 6,
         max_token_budget: int = 400,
         seed: int = 42,
+        enable_dense_retrieval: bool = True,
+        enable_query_rewrite: bool = True,
+        enable_summarization: bool = True,
+        enable_coverage_reward: bool = True,
+        enable_token_penalty: bool = True,
     ):
         super().__init__()
         self.docs = docs
@@ -39,6 +44,12 @@ class RlaRagEnv(gym.Env):
         self.max_steps = max_steps
         self.max_token_budget = max_token_budget
         self.rng = random.Random(seed)
+
+        self.enable_dense_retrieval = enable_dense_retrieval
+        self.enable_query_rewrite = enable_query_rewrite
+        self.enable_summarization = enable_summarization
+        self.enable_coverage_reward = enable_coverage_reward
+        self.enable_token_penalty = enable_token_penalty
 
         self.action_space = Discrete(len(Action))
         self.observation_space = Box(
@@ -130,6 +141,15 @@ class RlaRagEnv(gym.Env):
         self.last_confidence = confidence
         return answer, confidence
 
+    def _action_enabled(self, act: Action) -> bool:
+        if act == Action.RETRIEVE_DENSE and not self.enable_dense_retrieval:
+            return False
+        if act == Action.REWRITE_QUERY and not self.enable_query_rewrite:
+            return False
+        if act == Action.SUMMARIZE_EVIDENCE and not self.enable_summarization:
+            return False
+        return True
+
     def _finalize_info(
         self,
         predicted: str,
@@ -137,6 +157,7 @@ class RlaRagEnv(gym.Env):
         terminated_by_answer: bool,
         terminated: bool,
         truncated: bool,
+        action_enabled: bool,
     ) -> Dict:
         gold = self.current_sample.answer
         is_correct = normalize_text(predicted) == normalize_text(gold)
@@ -150,6 +171,7 @@ class RlaRagEnv(gym.Env):
             "done_by_answer": terminated_by_answer,
             "terminated": terminated,
             "truncated": truncated,
+            "action_enabled": action_enabled,
             "reward": reward,
             "qid": self.current_sample.qid,
         }
@@ -167,6 +189,7 @@ class RlaRagEnv(gym.Env):
                 terminated_by_answer=False,
                 terminated=False,
                 truncated=True,
+                action_enabled=False,
             )
             return self._obs(), float(reward), False, True, info
 
@@ -180,7 +203,11 @@ class RlaRagEnv(gym.Env):
         previous_coverage = self.support_coverage
 
         act = Action(action_id)
-        if act == Action.RETRIEVE_SPARSE:
+        action_enabled = self._action_enabled(act)
+
+        if not action_enabled:
+            reward -= 0.15
+        elif act == Action.RETRIEVE_SPARSE:
             results = self.pipeline.search_sparse(self.current_sample.question, self.current_query, k=3)
             new_docs = self._add_docs([r.doc_id for r in results])
             if results:
@@ -232,8 +259,10 @@ class RlaRagEnv(gym.Env):
 
         self._update_coverage()
         coverage_gain = self.support_coverage - previous_coverage
-        reward += 0.70 * coverage_gain
-        reward -= 0.002 * max(0, self.token_cost - self.max_token_budget)
+        if self.enable_coverage_reward:
+            reward += 0.70 * coverage_gain
+        if self.enable_token_penalty:
+            reward -= 0.002 * max(0, self.token_cost - self.max_token_budget)
 
         if not terminated and self.step_count >= self.max_steps:
             predicted_answer, confidence = self._answer()
@@ -248,5 +277,6 @@ class RlaRagEnv(gym.Env):
             terminated_by_answer=terminated_by_answer,
             terminated=terminated,
             truncated=truncated,
+            action_enabled=action_enabled,
         )
         return self._obs(), float(reward), terminated, truncated, info

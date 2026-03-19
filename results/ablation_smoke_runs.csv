@@ -1,0 +1,7 @@
+dataset,split_mode,eval_split,condition,seed,policy,avg_reward,accuracy,avg_support_coverage,avg_steps,avg_token_cost
+toy,random_split,test,full,42,baseline_sparse,0.24949999999999992,0.2,0.675,2.0,29.75
+toy,random_split,test,full,42,baseline_react,0.5074166666666665,0.3,0.75,5.0,87.3
+toy,random_split,test,full,42,rl,0.5287499999999998,0.3,0.775,2.0,30.05
+toy,random_split,test,no_dense,42,baseline_sparse,0.24949999999999992,0.2,0.675,2.0,29.75
+toy,random_split,test,no_dense,42,baseline_react,0.5144166666666665,0.3,0.75,4.0,52.8
+toy,random_split,test,no_dense,42,rl,0.4237499999999999,0.3,0.625,2.0,30.05

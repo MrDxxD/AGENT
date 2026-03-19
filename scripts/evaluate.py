@@ -2,11 +2,20 @@ import argparse
 
 from stable_baselines3 import PPO
 
-from rla_rag.data.dataset import split_qa_samples
-from rla_rag.data.loaders import load_project_dataset
+from rla_rag.data.loaders import load_project_splits
 from rla_rag.env.rla_rag_env import Action, RlaRagEnv
 from rla_rag.eval.runner import evaluate_baseline, evaluate_policy
 from rla_rag.pipeline import build_pipeline
+
+
+def parse_env_kwargs(args):
+    return {
+        "enable_dense_retrieval": not args.disable_dense,
+        "enable_query_rewrite": not args.disable_rewrite,
+        "enable_summarization": not args.disable_summary,
+        "enable_coverage_reward": not args.disable_coverage_reward,
+        "enable_token_penalty": not args.disable_token_penalty,
+    }
 
 
 def one_shot_sparse(step_idx: int) -> int:
@@ -15,25 +24,41 @@ def one_shot_sparse(step_idx: int) -> int:
     return int(Action.ANSWER_NOW)
 
 
-def react_style(step_idx: int) -> int:
-    if step_idx == 0:
-        return int(Action.RETRIEVE_SPARSE)
-    if step_idx == 1:
-        return int(Action.REWRITE_QUERY)
-    if step_idx == 2:
-        return int(Action.RETRIEVE_DENSE)
-    if step_idx == 3:
-        return int(Action.SUMMARIZE_EVIDENCE)
-    return int(Action.ANSWER_NOW)
+def make_react_style(env_kwargs):
+    sequence = [Action.RETRIEVE_SPARSE]
+    if env_kwargs.get("enable_query_rewrite", True):
+        sequence.append(Action.REWRITE_QUERY)
+    if env_kwargs.get("enable_dense_retrieval", True):
+        sequence.append(Action.RETRIEVE_DENSE)
+    if env_kwargs.get("enable_summarization", True):
+        sequence.append(Action.SUMMARIZE_EVIDENCE)
+
+    def _policy(step_idx: int) -> int:
+        if step_idx < len(sequence):
+            return int(sequence[step_idx])
+        return int(Action.ANSWER_NOW)
+
+    return _policy
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", type=str, default="toy", choices=["toy", "hotpot"])
     parser.add_argument("--hotpot-path", type=str, default="")
+    parser.add_argument("--train-path", type=str, default="")
+    parser.add_argument("--dev-path", type=str, default="")
+
     parser.add_argument("--max-samples", type=int, default=0)
+    parser.add_argument("--max-train-samples", type=int, default=0)
+    parser.add_argument("--max-dev-samples", type=int, default=0)
     parser.add_argument("--train-ratio", type=float, default=0.6)
     parser.add_argument("--dev-ratio", type=float, default=0.2)
+
+    parser.add_argument("--disable-dense", action="store_true")
+    parser.add_argument("--disable-rewrite", action="store_true")
+    parser.add_argument("--disable-summary", action="store_true")
+    parser.add_argument("--disable-coverage-reward", action="store_true")
+    parser.add_argument("--disable-token-penalty", action="store_true")
 
     parser.add_argument("--model", type=str, default="models/ppo_rla_rag.zip")
     parser.add_argument("--episodes", type=int, default=300)
@@ -41,19 +66,25 @@ def main():
     parser.add_argument("--split", type=str, default="test", choices=["dev", "test"])
     args = parser.parse_args()
 
-    docs, qa_samples = load_project_dataset(
+    docs, train_samples, dev_samples, test_samples, split_mode = load_project_splits(
         dataset=args.dataset,
-        hotpot_path=args.hotpot_path,
-        max_samples=args.max_samples if args.max_samples > 0 else None,
-    )
-    _, dev_samples, test_samples = split_qa_samples(
-        qa_samples,
+        seed=args.seed,
         train_ratio=args.train_ratio,
         dev_ratio=args.dev_ratio,
-        seed=args.seed,
+        hotpot_path=args.hotpot_path,
+        train_path=args.train_path,
+        dev_path=args.dev_path,
+        max_samples=args.max_samples if args.max_samples > 0 else None,
+        max_train_samples=args.max_train_samples if args.max_train_samples > 0 else None,
+        max_dev_samples=args.max_dev_samples if args.max_dev_samples > 0 else None,
     )
-    eval_samples = dev_samples if args.split == "dev" and dev_samples else test_samples
 
+    if args.split == "dev":
+        eval_samples = dev_samples
+    else:
+        eval_samples = test_samples if test_samples else dev_samples
+
+    env_kwargs = parse_env_kwargs(args)
     pipeline = build_pipeline(docs)
     env = RlaRagEnv(
         docs=docs,
@@ -62,15 +93,18 @@ def main():
         max_steps=6,
         max_token_budget=400,
         seed=args.seed,
+        **env_kwargs,
     )
 
     print(
-        f"Dataset={args.dataset}, docs={len(docs)}, qa={len(qa_samples)}, "
+        f"Dataset={args.dataset}, split_mode={split_mode}, docs={len(docs)}, "
+        f"train/dev/test={len(train_samples)}/{len(dev_samples)}/{len(test_samples)}, "
         f"eval_split={args.split}, eval_size={len(eval_samples)}"
     )
+    print(f"EnvAblation={env_kwargs}")
 
     sparse_metrics = evaluate_baseline(env, one_shot_sparse, episodes=args.episodes)
-    react_metrics = evaluate_baseline(env, react_style, episodes=args.episodes)
+    react_metrics = evaluate_baseline(env, make_react_style(env_kwargs), episodes=args.episodes)
 
     print(f"[Eval split] {args.split}")
     print("[Baseline] One-shot sparse RAG")
